@@ -1,0 +1,145 @@
+build:
+  docker:
+    web: Dockerfile
+
+MIT License
+
+Copyright (c) 2019 Yuki Kikuchi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+# Daevei
+
+## 概述
+
+用于在 Heroku 上部署 vless+websocket+tls，每次部署自动选择最新的 alpine linux 和 xray core。  
+vless 相比 vmess 性能更加优秀，占用资源更少，运行更加稳定。
+
+## 镜像
+
+经测试本镜像占用内存资源较低，运行稳定。
+
+[![Deploy](https://www.herokucdn.com/deploy/button.png)](https://dashboard.heroku.com/new?template=https%3A%2F%2Fgithub.com%2FGrenl%2FDaevei)
+
+## 注意
+
+### 路径
+
+`WebSocket` 路径(配置文件中的 `path` )为 `/app` 。
+
+### 端口
+
+`端口` 为 `443` 。
+
+### alterId
+
+`alterId` 为 `0` 。
+
+### UUID
+
+`UUID` 默认为 `2cf257d7-a1ac-41ea-88ab-1bb3d1930245` 可自行设置。
+
+## 流量中转
+
+可以使用cloudflare的workers来`中转流量`，配置为：  
+
+addEventListener(  
+&emsp;&emsp;"fetch",event => {  
+&emsp;&emsp;&emsp;&emsp;let url=new URL(event.request.url);  
+&emsp;&emsp;&emsp;&emsp;url.hostname="xx.herokuapp.com";//你的heroku域名    
+&emsp;&emsp;&emsp;&emsp;let request=new Request(url,event.request);  
+&emsp;&emsp;&emsp;&emsp;event. respondWith(  
+&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;fetch(request)  
+&emsp;&emsp;&emsp;&emsp;)  
+&emsp;&emsp;}  
+)  
+
+{
+  "name": "Daevei",
+  "description": "Deploy vless on Heroku.",
+  "keywords": [
+    "vless"
+  ],
+  "env": {
+    "UUID": {
+      "description": "VLESS UUID",
+      "value": "2cf257d7-a1ac-41ea-88ab-1bb3d1930245"
+    }
+  },
+  "website": "https://github.com/Grenl/",
+  "repository": "https://github.com/Grenl/Daevei",
+  "stack": "container"
+}
+#!/bin/sh
+
+# Download and install xray
+mkdir /tmp/xray
+curl -L -H "Cache-Control: no-cache" -o /tmp/xray/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+unzip /tmp/xray/xray.zip -d /tmp/xray
+install -m 755 /tmp/xray/xray /usr/local/bin/xray
+
+# Remove temporary directory
+rm -rf /tmp/xray
+
+# xray new configuration
+install -d /usr/local/etc/xray
+cat << EOF > /usr/local/etc/xray/config.json
+{
+  "log": {
+    "loglevel": "none"
+  },
+  "inbounds": [
+    {
+      "port": $PORT,
+      "protocol": "VLESS",
+      "settings": {
+        "clients": [
+          {
+            "id": "$UUID",
+            "alterId": 0
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "wsSettings": {
+          "path": "/app"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom"
+    }
+  ]
+}
+EOF
+
+# Run xray
+/usr/local/bin/xray -config /usr/local/etc/xray/config.json
+
+FROM alpine:latest
+
+RUN apk add --no-cache --virtual .build-deps ca-certificates curl unzip
+
+ADD configure.sh /configure.sh
+RUN chmod +x /configure.sh
+CMD /configure.sh
